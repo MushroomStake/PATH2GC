@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --accent-green: #008000;
 }
 
 @theme inline {
@@ -24,3 +25,10 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* small helpers for fallback when tailwind isn't available */
+.btn-green {
+  background-color: var(--accent-green);
+  color: #fff;
+}
+
