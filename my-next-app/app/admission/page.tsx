@@ -1,12 +1,13 @@
 "use server";
 import Link from 'next/link';
 import AdmissionsChat from '../components/AdmissionsChat';
-import { supabaseAdmin } from '../../src/lib/supabaseServer';
+import { getSupabaseAdmin } from '../../src/lib/supabaseServer';
 
 export default async function AdmissionLanding() {
   // Fetch admission steps server-side (requires SUPABASE_SERVICE_ROLE)
   let steps: Array<{ id: string; step_order: number; title: string; description: string }> = [];
   try {
+    const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.from('admission_steps').select('id,step_order,title,description').order('step_order', { ascending: true });
     if (!error && data) {
       steps = data as any;

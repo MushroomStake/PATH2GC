@@ -1,6 +1,6 @@
 "use server";
 import AdmissionsChat from '../../components/AdmissionsChat';
-import { supabaseAdmin } from '../../../src/lib/supabaseServer';
+import { getSupabaseAdmin } from '../../../src/lib/supabaseServer';
 
 type Props = { params: { step: string } };
 
@@ -9,6 +9,7 @@ export default async function StepPage({ params }: Props) {
   // step is expected to be the UUID id of the admission_steps row
   let stepRow: { id: string; step_order: number; title: string; description: string; checklist?: any } | null = null;
   try {
+    const supabaseAdmin = getSupabaseAdmin();
     const { data, error } = await supabaseAdmin.from('admission_steps').select('*').eq('id', step).limit(1).single();
     if (!error && data) stepRow = data as any;
   } catch (e) {
