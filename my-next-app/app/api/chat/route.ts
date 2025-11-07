@@ -4,11 +4,14 @@ import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE;
+// When true, the server will return a deterministic local mock reply instead of calling the LLM provider.
+const USE_MOCK_LLM = process.env.USE_MOCK_LLM === 'true';
 // Provider: Cerebras
 // NOTE: Assumption: Cerebras exposes a simple REST endpoint that accepts a POST with an auth Bearer token.
 // If your Cerebras provider uses a different shape/path, set `CEREBRAS_API_URL` in your environment to the correct URL.
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 const CEREBRAS_API_URL = process.env.CEREBRAS_API_URL || 'https://api.cerebras.net/v1/generate';
+const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'llama-3.3-70b';
 
 const supabase = SUPABASE_SERVICE_ROLE && SUPABASE_URL
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
@@ -18,11 +21,12 @@ const supabase = SUPABASE_SERVICE_ROLE && SUPABASE_URL
 let detectedConfig: null | {
   url: string;
   authHeader: 'authorization' | 'x-api-key';
-  payloadStyle: 'prompt' | 'input' | 'messages' | 'openai';
+  payloadStyle: 'prompt' | 'input' | 'messages' | 'openai' | 'chat';
 } = null;
 
 const CANDIDATE_URLS = Array.from(new Set([
   CEREBRAS_API_URL,
+  'https://api.cerebras.ai/v1/chat/completions',
   'https://api.cerebras.ai/v1/generate',
   'https://api.cerebras.net/v1/generate',
   'https://api.cerebras.ai/v1/models/gpt-large/generate',
@@ -48,8 +52,10 @@ async function detectProvider() {
     { headerName: 'x-api-key', headerValue: CEREBRAS_API_KEY, key: 'x-api-key' as const },
   ];
 
-  const payloadStyles: Array<{ style: 'prompt' | 'input' | 'messages' | 'openai'; body: any }> = [
+  const payloadStyles: Array<{ style: 'prompt' | 'input' | 'messages' | 'openai' | 'chat'; body: any }> = [
     { style: 'prompt', body: { prompt: 'ping', context: 'test', max_tokens: 1 } },
+    // Chat-style with explicit model + messages (Cerebras chat/completions)
+    { style: 'chat', body: { model: CEREBRAS_MODEL, messages: [{ role: 'user', content: 'ping' }], stream: false, max_tokens: 1 } } as any,
     { style: 'input', body: { input: 'ping' } },
     { style: 'messages', body: { messages: [{ role: 'user', content: 'ping' }] } },
     { style: 'openai', body: { model: 'gpt-large', prompt: 'ping', max_tokens: 1 } },
@@ -121,6 +127,8 @@ function extractTextFromProviderResponse(json: any): string {
   if (json.output?.[0]?.content?.[0]?.text) return json.output[0].content[0].text;
   // 3) OpenAI-like: { choices: [{ text: '...' }] }
   if (json.choices?.[0]?.text) return json.choices[0].text;
+  // 3b) Chat-style: { choices: [{ message: { content: '...' } }] }
+  if (json.choices?.[0]?.message?.content) return json.choices[0].message.content;
   // 4) Some providers use data[0].text or generated_text
   if (json.data?.[0]?.text) return json.data[0].text;
   if (json.generated_text) return json.generated_text;
@@ -167,18 +175,60 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Fetch a small amount of authoritative content from Supabase to include as context in the prompt
-    let contextPieces: string[] = [];
-    if (supabase) {
+  // Fetch authoritative content from Supabase and pick the most relevant pieces for the user's question.
+  let contextPieces: string[] = [];
+  // keep top matches available after fetch so we can return deterministic answers for common intents
+  let topSteps: any[] = [];
+  let topFaqs: any[] = [];
+  if (supabase) {
       try {
-        const stepsRes = await supabase.from('admission_steps').select('step_order,title,description').order('step_order', { ascending: true }).limit(3);
-        if (!stepsRes.error && stepsRes.data) {
-          const sText = (stepsRes.data as any[]).map((s) => `${s.step_order}. ${s.title}: ${s.description}`).join('\n');
-          if (sText) contextPieces.push(`Top admission steps:\n${sText}`);
+        // helper: simple tokenizer and relevance scoring by token overlap (fast, no external APIs)
+        const tokenize = (txt: string) => (txt || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).filter(w => w.length > 2);
+        const scoreText = (query: string, text: string) => {
+          const qTokens = new Set(tokenize(query));
+          if (qTokens.size === 0) return 0;
+          const tTokens = tokenize(text);
+          let matches = 0;
+          for (const t of tTokens) if (qTokens.has(t)) matches++;
+          return matches / Math.max(1, tTokens.length);
+        };
+
+        // Fetch admission steps and faqs (small tables assumed)
+        const stepsRes = await supabase.from('admission_steps').select('id,step_order,title,description,checklist');
+        const faqsRes = await supabase.from('faqs').select('id,question,answer');
+
+        const steps = (!stepsRes.error && stepsRes.data) ? (stepsRes.data as any[]) : [];
+        const faqs = (!faqsRes.error && faqsRes.data) ? (faqsRes.data as any[]) : [];
+
+        // Score and pick top N relevant items
+        topSteps = steps
+          .map(s => ({ item: s, score: Math.max(scoreText(trimmed, s.title || ''), scoreText(trimmed, s.description || '')) }))
+          .sort((a,b) => b.score - a.score)
+          .filter(x => x.score > 0)
+          .slice(0, 4)
+          .map(x => x.item);
+
+        topFaqs = faqs
+          .map(f => ({ item: f, score: Math.max(scoreText(trimmed, f.question || ''), scoreText(trimmed, f.answer || '')) }))
+          .sort((a,b) => b.score - a.score)
+          .filter(x => x.score > 0)
+          .slice(0, 6)
+          .map(x => x.item);
+
+        if (topSteps.length) {
+          const sText = topSteps.map((s: any) => `${s.step_order}. ${s.title}: ${s.description}`).join('\n');
+          contextPieces.push(`Top relevant admission steps:\n${sText}`);
         }
-        const faqsRes = await supabase.from('faqs').select('question,answer').limit(5);
-        if (!faqsRes.error && faqsRes.data) {
-          const fText = (faqsRes.data as any[]).map((f) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
+        if (topFaqs.length) {
+          const fText = topFaqs.map((f: any) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
+          contextPieces.push(`Relevant FAQs:\n${fText}`);
+        }
+
+        // As a fallback include a short list of the first few steps/faqs to provide general context
+        if (contextPieces.length === 0) {
+          const sText = steps.slice(0,3).map((s: any) => `${s.step_order}. ${s.title}: ${s.description}`).join('\n');
+          if (sText) contextPieces.push(`Top admission steps:\n${sText}`);
+          const fText = faqs.slice(0,5).map((f: any) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
           if (fText) contextPieces.push(`Helpful FAQs:\n${fText}`);
         }
       } catch (e) {
@@ -188,12 +238,61 @@ export async function POST(req: NextRequest) {
 
     const contextString = contextPieces.join('\n\n').slice(0, 4000); // truncate to avoid huge prompts
 
-    const systemPrompt = `You are an admissions assistant for a college. Provide step-by-step guidance for freshmen applicants. Keep answers concise and include suggested next steps. If a question requests forms or file downloads, point to the Admissions page.${contextString ? '\n\nContext from the college database:\n' + contextString : ''}`;
+    // If we found direct matches in the DB, handle some common admissions intents locally
+    // to avoid LLM clarification loops and to guarantee grounded answers.
+  const sources: Array<{ type: 'step' | 'faq'; id: any; title: string }> = [];
+  const applyIntent = /\bhow\b.*\bapply\b|\bhow to apply\b|\bhow do i apply\b|\bhow can i apply\b|application process|steps to apply|apply process/.test(trimmed.toLowerCase());
+    const docsIntent = /document|documents|requirements|what do i need|what documents/.test(lower);
+    if ((applyIntent || docsIntent) && topSteps.length > 0) {
+      // Build a deterministic, step-by-step answer from the admission steps
+      const lines: string[] = [];
+      lines.push('To apply, follow these steps:');
+      for (const s of topSteps) {
+        let line = `${s.step_order}. ${s.title}`;
+        if (s.description) line += ` — ${s.description}`;
+        if (s.checklist) line += `\nChecklist: ${s.checklist}`;
+        lines.push(line);
+        sources.push({ type: 'step', id: s.id, title: s.title });
+      }
+      if (topFaqs.length) {
+        lines.push('\nHelpful FAQs:');
+        for (const f of topFaqs) {
+          lines.push(`Q: ${f.question}\nA: ${f.answer}`);
+          sources.push({ type: 'faq', id: f.id, title: f.question });
+        }
+      }
+      const assistantTextFromDb = lines.join('\n\n');
+      // Log chat to Supabase if available (with sources)
+      if (supabase) {
+        try {
+          await supabase.from('chat_logs').insert({ session_id: sessionId || null, user_message: trimmed, assistant_response: assistantTextFromDb, source_meta: sources });
+        } catch (e) {
+          console.error('Supabase insert failed', e);
+        }
+      }
+      return NextResponse.json({ reply: assistantTextFromDb, sources });
+    }
+
+  const systemPrompt = `You are an admissions assistant for this college. ONLY answer questions strictly related to the college, its admissions process, application requirements, deadlines, fees, scholarships, interviews, program information, campus procedures, and Frequently Asked Questions (FAQs). Use the provided database context when available and avoid inventing details.
+
+If a user's question is outside admissions/school scope, respond briefly with: "I can only answer questions about this college's admissions and FAQs. For other topics, please contact the admissions office." Do not provide unrelated advice or general information outside the school's admissions and FAQ content. When you use content from the database, cite the source items used (e.g., "Source: Admission Step 2 - Application Documents"). Keep answers concise and include suggested next steps. If a question requests forms or file downloads, point the user to the Admissions page.${contextString ? '\n\nContext from the college database:\n' + contextString : ''}`;
 
     let assistantText = '';
 
-    if (!CEREBRAS_API_KEY) {
-      // Development canned response
+    // If the mock toggle is enabled, return a helpful deterministic reply so the UI can be tested locally.
+    if (USE_MOCK_LLM) {
+      const q = trimmed.toLowerCase();
+      if (q.includes('document') || q.includes('documents') || q.includes('what do i need')) {
+        assistantText = `Mock reply: To apply as a freshman you'll typically need: 1) Completed application form; 2) PSA/ID or Birth Certificate; 3) Senior High School Transcript or Report Card; 4) 2x2 ID photos; 5) Any program-specific forms. Check the Admissions page for exact file formats and upload instructions.`;
+      } else if (q.includes('how to apply') || q.includes('apply')) {
+        assistantText = `Mock reply: Create an account on the Admissions portal, fill out the online application, upload required documents, and pay the application fee. After submission, watch for a confirmation email and follow any steps listed there (exams, interviews).`;
+      } else if (q.includes('deadline') || q.includes('when')) {
+        assistantText = `Mock reply: Deadlines vary by term. Check the Announcement / Enrollment Bulletin on the Admissions page or contact the admissions office for the latest dates.`;
+      } else {
+        assistantText = `Mock reply: I can help you with admissions steps. You asked: "${trimmed}". Try: "What documents do I need?" or "How to apply?"`;
+      }
+    } else if (!CEREBRAS_API_KEY) {
+      // Development canned response when no provider key is configured.
       assistantText = `Canned reply: I can help you with admissions steps. You asked: "${trimmed}". Try: "What documents do I need?" or "How to apply?"`;
     } else {
       // Try to autodetect a working endpoint/auth/payload shape and cache it (dev only).
@@ -212,6 +311,9 @@ export async function POST(req: NextRequest) {
         switch (provider.payloadStyle) {
           case 'prompt':
             bodyObj = { prompt: trimmed, context: systemPrompt, temperature: 0.2, max_tokens: 1024 };
+            break;
+          case 'chat':
+            bodyObj = { model: CEREBRAS_MODEL, messages: [{ role: 'user', content: trimmed }], stream: false, max_tokens: 1024 };
             break;
           case 'input':
             bodyObj = { input: trimmed };
