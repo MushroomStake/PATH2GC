@@ -1,5 +1,4 @@
 "use server";
-import AdmissionsChat from '../../components/AdmissionsChat';
 import { getSupabaseAdmin } from '../../../src/lib/supabaseServer';
 
 type Props = { params: { step: string } };

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { matchIntent, renderIntentResponse } from '../../../src/lib/intents';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE;
@@ -158,7 +159,7 @@ export async function POST(req: NextRequest) {
       console.error('Failed to parse request body as JSON', parseErr);
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { sessionId, message } = body;
+  const { sessionId, message, userId } = body;
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'Invalid message' }, { status: 400 });
     }
@@ -238,39 +239,23 @@ export async function POST(req: NextRequest) {
 
     const contextString = contextPieces.join('\n\n').slice(0, 4000); // truncate to avoid huge prompts
 
-    // If we found direct matches in the DB, handle some common admissions intents locally
-    // to avoid LLM clarification loops and to guarantee grounded answers.
-  const sources: Array<{ type: 'step' | 'faq'; id: any; title: string }> = [];
-  const applyIntent = /\bhow\b.*\bapply\b|\bhow to apply\b|\bhow do i apply\b|\bhow can i apply\b|application process|steps to apply|apply process/.test(trimmed.toLowerCase());
-    const docsIntent = /document|documents|requirements|what do i need|what documents/.test(lower);
-    if ((applyIntent || docsIntent) && topSteps.length > 0) {
-      // Build a deterministic, step-by-step answer from the admission steps
-      const lines: string[] = [];
-      lines.push('To apply, follow these steps:');
-      for (const s of topSteps) {
-        let line = `${s.step_order}. ${s.title}`;
-        if (s.description) line += ` — ${s.description}`;
-        if (s.checklist) line += `\nChecklist: ${s.checklist}`;
-        lines.push(line);
-        sources.push({ type: 'step', id: s.id, title: s.title });
-      }
-      if (topFaqs.length) {
-        lines.push('\nHelpful FAQs:');
-        for (const f of topFaqs) {
-          lines.push(`Q: ${f.question}\nA: ${f.answer}`);
-          sources.push({ type: 'faq', id: f.id, title: f.question });
+    // Try intent matching to see if we can reply deterministically from DB
+    const sources: Array<{ type: 'step' | 'faq'; id: any; title: string }> = [];
+    const intent = matchIntent(trimmed);
+    if (intent) {
+      // If intent matched, and we have DB rows (topSteps/topFaqs), render template
+      const rendered = renderIntentResponse(intent.id, topSteps, topFaqs);
+      if (rendered && rendered.reply) {
+        // log with path info
+        if (supabase) {
+          try {
+            await supabase.from('chat_logs').insert({ session_id: sessionId || null, user_id: userId || null, user_message: trimmed, assistant_response: rendered.reply, source_meta: rendered.sources, path: 'deterministic' });
+          } catch (e) {
+            console.error('Supabase insert failed', e);
+          }
         }
+        return NextResponse.json({ reply: rendered.reply, sources: rendered.sources, path: 'deterministic' });
       }
-      const assistantTextFromDb = lines.join('\n\n');
-      // Log chat to Supabase if available (with sources)
-      if (supabase) {
-        try {
-          await supabase.from('chat_logs').insert({ session_id: sessionId || null, user_message: trimmed, assistant_response: assistantTextFromDb, source_meta: sources });
-        } catch (e) {
-          console.error('Supabase insert failed', e);
-        }
-      }
-      return NextResponse.json({ reply: assistantTextFromDb, sources });
     }
 
   const systemPrompt = `You are an admissions assistant for this college. ONLY answer questions strictly related to the college, its admissions process, application requirements, deadlines, fees, scholarships, interviews, program information, campus procedures, and Frequently Asked Questions (FAQs). Use the provided database context when available and avoid inventing details.
@@ -308,21 +293,35 @@ If a user's question is outside admissions/school scope, respond briefly with: "
         } else {
           headers['Authorization'] = `Bearer ${CEREBRAS_API_KEY}`;
         }
+        // Ensure the system prompt is included for chat-style providers by inserting it as a system message
         switch (provider.payloadStyle) {
           case 'prompt':
             bodyObj = { prompt: trimmed, context: systemPrompt, temperature: 0.2, max_tokens: 1024 };
             break;
           case 'chat':
-            bodyObj = { model: CEREBRAS_MODEL, messages: [{ role: 'user', content: trimmed }], stream: false, max_tokens: 1024 };
+            // Chat-style providers expect a messages array with a system message first
+            bodyObj = {
+              model: CEREBRAS_MODEL,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: trimmed }
+              ],
+              stream: false,
+              temperature: 0.2,
+              max_tokens: 1024
+            };
             break;
           case 'input':
-            bodyObj = { input: trimmed };
+            // Some providers support an input + context field
+            bodyObj = { input: trimmed, context: systemPrompt };
             break;
           case 'messages':
-            bodyObj = { messages: [{ role: 'user', content: trimmed }] };
+            // Include system message for generic messages-style providers
+            bodyObj = { messages: [ { role: 'system', content: systemPrompt }, { role: 'user', content: trimmed } ] };
             break;
           case 'openai':
-            bodyObj = { model: 'gpt-large', prompt: trimmed, max_tokens: 1024 };
+            // For OpenAI-like completions, prepend the system prompt to the prompt body
+            bodyObj = { model: 'gpt-large', prompt: systemPrompt + '\n\nUser: ' + trimmed, max_tokens: 1024, temperature: 0.2 };
             break;
           default:
             bodyObj = { prompt: trimmed, context: systemPrompt };
@@ -368,16 +367,33 @@ If a user's question is outside admissions/school scope, respond briefly with: "
       assistantText = extractTextFromProviderResponse(json) || 'No reply from provider';
     }
 
-    // Log chat to Supabase if available
+    // Normalize sources and path for non-deterministic replies (LLM / mock / canned)
+    const responsePath = USE_MOCK_LLM ? 'mock' : (CEREBRAS_API_KEY ? 'llm' : 'canned');
+
+    // If we didn't already populate sources (used by deterministic responses), build them from fetched DB rows
+    try {
+      if (sources.length === 0 && (topSteps.length || topFaqs.length)) {
+        for (const s of topSteps) {
+          if (s && s.id) sources.push({ type: 'step', id: s.id, title: s.title || (`Step ${s.step_order || ''}`) });
+        }
+        for (const f of topFaqs) {
+          if (f && f.id) sources.push({ type: 'faq', id: f.id, title: f.question || '' });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to build sources array', e);
+    }
+
+    // Log chat to Supabase if available (include source metadata and path)
     if (supabase) {
       try {
-        await supabase.from('chat_logs').insert({ session_id: sessionId || null, user_message: trimmed, assistant_response: assistantText });
+        await supabase.from('chat_logs').insert({ session_id: sessionId || null, user_id: userId || null, user_message: trimmed, assistant_response: assistantText, source_meta: sources, path: responsePath });
       } catch (e) {
         console.error('Supabase insert failed', e);
       }
     }
 
-    return NextResponse.json({ reply: assistantText });
+    return NextResponse.json({ reply: assistantText, sources, path: responsePath });
   } catch (error) {
     console.error('Chat route error', error);
     const isProd = process.env.NODE_ENV === 'production';

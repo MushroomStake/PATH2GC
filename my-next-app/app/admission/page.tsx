@@ -1,6 +1,5 @@
 "use server";
 import Link from 'next/link';
-import AdmissionsChat from '../components/AdmissionsChat';
 import { getSupabaseAdmin } from '../../src/lib/supabaseServer';
 
 export default async function AdmissionLanding() {
@@ -19,7 +18,7 @@ export default async function AdmissionLanding() {
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
       <h1 className="mb-4 text-3xl font-bold text-[#006600]">Admission — Freshmen Guide</h1>
-      <p className="mb-6 text-gray-700">Follow the steps below to complete your application. Use the assistant (bottom-right) if you need help.</p>
+  <p className="mb-6 text-gray-700">Follow the steps below to complete your application. If you need help, consult the FAQs or contact the admissions office.</p>
 
       <ol className="space-y-4">
         {steps.map((s) => (

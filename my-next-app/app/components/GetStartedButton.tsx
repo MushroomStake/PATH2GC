@@ -4,11 +4,12 @@ import React from 'react';
 export default function GetStartedButton() {
   function openChat() {
     try {
-      const input = document.getElementById('admissions-chat-input') as HTMLInputElement | null;
+      // Try to focus the assistant input if present on the page
+      const input = document.getElementById('assistant-input') as HTMLInputElement | null;
       if (input) {
         input.focus();
         // optional: add a small visual pulse to the chat
-        const chat = document.getElementById('admissions-chat');
+        const chat = document.getElementById('admissions-chat') || document.getElementById('assistant-panel');
         if (chat) {
           chat.animate([
             { boxShadow: '0 8px 24px rgba(0,0,0,0.06)' },
@@ -18,10 +19,10 @@ export default function GetStartedButton() {
         }
         return;
       }
-      // fallback: navigate to admissions page where chat is available
-      window.location.href = '/admission';
+      // fallback: navigate to the assistant page
+      window.location.href = '/assistant';
     } catch (e) {
-      window.location.href = '/admission';
+      window.location.href = '/assistant';
     }
   }
 

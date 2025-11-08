@@ -3,18 +3,18 @@ import GetStartedButton from './components/GetStartedButton';
 export default function Home() {
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900">
-      <main className="mx-auto w-full max-w-6xl px-6 py-20">
-        <section className="mb-10 flex w-full items-start justify-between gap-8 rounded-lg bg-white p-8 shadow-sm">
+      <main className="mx-auto w-full max-w-6xl px-6 py-12">
+        <section className="mb-8 w-full rounded-lg bg-white p-6 shadow-sm md:flex md:items-start md:justify-between md:gap-8">
           <div className="max-w-3xl">
-            <h1 className="mb-4 text-4xl font-extrabold leading-tight text-[#006600]">Gordon College — Freshmen Admission Guide</h1>
-            <p className="mb-6 text-lg text-gray-700">Find everything you need to apply to Gordon College as a freshman. Use the assistant to guide you step-by-step.</p>
-            <div className="flex gap-4">
+            <h1 className="mb-4 text-3xl sm:text-4xl font-extrabold leading-tight text-[#006600]">Gordon College — Admission Guide</h1>
+            <p className="mb-6 text-base sm:text-lg text-gray-700">Find everything you need to apply to Gordon College. Use the assistant to guide you step-by-step.</p>
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
               <GetStartedButton />
-              <a href="/admission" className="inline-flex items-center rounded-md border border-[#008000] px-5 py-3 text-sm font-medium text-[#008000]">Learn more</a>
+              <a href="/about" className="inline-flex items-center justify-center rounded-md border border-[#008000] px-5 py-3 text-sm font-medium text-[#008000]">Learn more</a>
             </div>
           </div>
 
-          <div className="w-1/3 shrink-0">
+          <div className="mt-6 w-full md:mt-0 md:w-1/3">
             <div className="rounded border p-4">
               <h3 className="mb-2 text-lg font-semibold text-[#006600]">Announcement / Enrollment Bulletin</h3>
               <div className="text-sm text-gray-700">
@@ -43,46 +43,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="mt-10 rounded-lg border p-6">
-          <h3 className="mb-3 text-xl font-semibold text-[#006600]">Freshmen Admission — Quick Procedures</h3>
-          <div className="text-sm text-gray-700 space-y-2">
-            <p><strong>STEP 1 — CREATE ONLINE PORTAL ACCOUNT</strong></p>
-            <ol className="list-decimal pl-5">
-              <li>Go to Gordon College Admission Portal: <a className="text-[#006600]" href="https://gordoncollege.edu.ph/gca/student/">https://gordoncollege.edu.ph/gca/student/</a></li>
-              <li>Click “Create Account” and register with your email and personal details. Use a valid email and don’t create multiple accounts.</li>
-            </ol>
-
-            <p className="mt-3"><strong>STEP 2 — LOG ON TO YOUR ACCOUNT</strong></p>
-            <ol className="list-decimal pl-5">
-              <li>Log in using your registered email and password; the Dashboard shows application status.</li>
-            </ol>
-
-            <p className="mt-3"><strong>STEP 3 — PROFILING</strong></p>
-            <ol className="list-decimal pl-5">
-              <li>Upload a recent 2x2 colored photo (white background). No eyeglasses or accessories; formal collared top.</li>
-              <li>Complete all profile forms (Personal Info, Family Background, Desired Programs) and accept the Data Privacy Notice.</li>
-            </ol>
-
-            <p className="mt-3"><strong>STEP 4 — UPLOADING OF DOCUMENTS</strong></p>
-            <ol className="list-decimal pl-5">
-              <li>Upload scanned documents (2MB or less): Good Moral Certificate, PSA Birth Certificate, Senior High School ID or any valid ID.</li>
-              <li>Submit uploads to finalize.</li>
-            </ol>
-
-            <p className="mt-3"><strong>STEP 5 — GCAT SCHEDULE</strong></p>
-            <ol className="list-decimal pl-5">
-              <li>Check your portal for the GCAT schedule. Download the GCAT schedule slip and Student Information Sheet when posted.</li>
-            </ol>
-
-            <p className="mt-4"><strong>What to bring on test day:</strong></p>
-            <ul className="list-disc pl-5">
-              <li>GCAT Schedule Slip</li>
-              <li>Student Information Sheet</li>
-              <li>Senior High School or any valid ID Card</li>
-              <li>Pencil and Pen</li>
-            </ul>
-          </div>
-        </section>
+        {/* Freshmen Admission quick procedures section removed per request */}
       </main>
     </div>
   );
