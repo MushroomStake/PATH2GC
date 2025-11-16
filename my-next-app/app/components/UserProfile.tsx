@@ -96,8 +96,8 @@ export default function UserProfile() {
 
   return (
     <div className="mx-auto max-w-3xl p-6">
-      <div className="rounded bg-white p-6 shadow border text-gray-900">
-        <h2 className="text-lg font-semibold mb-4 text-gray-900">Profile</h2>
+      <div className="rounded p-6 shadow" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--card-border)' }}>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--foreground)' }}>Profile</h2>
         {!user ? (
           <div className="text-sm text-gray-700">Please sign in to edit your profile.</div>
         ) : (
@@ -107,21 +107,21 @@ export default function UserProfile() {
                 {avatarUrl ? <img src={avatarUrl} alt="avatar" className="h-full w-full object-cover" /> : <div className="h-full w-full flex items-center justify-center text-gray-500">No</div>}
               </div>
               <div>
-                <div className="text-sm text-gray-700">Email (read-only)</div>
-                <div className="text-sm font-medium text-gray-900">{email}</div>
-                <div className="mt-2 text-xs text-gray-600">Upload a profile image (optional)</div>
+                <div className="text-sm" style={{ color: 'var(--foreground)', opacity: 0.9 }}>Email (read-only)</div>
+                <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{email}</div>
+                <div className="mt-2 text-xs" style={{ color: 'var(--foreground)', opacity: 0.8 }}>Upload a profile image (optional)</div>
                 <input type="file" accept="image/*" onChange={onFileChange} className="mt-2" />
               </div>
             </div>
 
             <label className="block">
               <div className="text-sm text-gray-700">Name</div>
-              <input value={name} onChange={e => setName(e.target.value)} className="mt-1 w-full rounded border px-3 py-2 text-gray-900 placeholder-gray-400" />
+              <input value={name} onChange={e => setName(e.target.value)} className="mt-1 w-full rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
             </label>
 
             <label className="block">
               <div className="text-sm text-gray-700">Contact number</div>
-              <input value={contact} onChange={e => setContact(e.target.value)} className="mt-1 w-full rounded border px-3 py-2 text-gray-900 placeholder-gray-400" />
+              <input value={contact} onChange={e => setContact(e.target.value)} className="mt-1 w-full rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
             </label>
 
             <label className="flex items-center gap-3">
@@ -130,7 +130,7 @@ export default function UserProfile() {
             </label>
 
             <div className="flex items-center gap-2">
-              <button onClick={save} disabled={loading} className="rounded bg-[#006600] px-4 py-2 text-white">{loading ? 'Saving...' : 'Save'}</button>
+              <button onClick={save} disabled={loading} className="rounded px-4 py-2" style={{ background: 'var(--nav-accent)', color: 'var(--nav-button-text)' }}>{loading ? 'Saving...' : 'Save'}</button>
               {message ? <div className="text-sm text-gray-700">{message}</div> : null}
             </div>
           </div>

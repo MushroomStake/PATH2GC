@@ -78,15 +78,15 @@ export default function AuthModal({ onClose, initial = "login" }: { onClose: () 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-50 w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
+      <div className="relative z-50 w-full max-w-md rounded-lg p-6 shadow-lg" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--card-border)' }}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-[#006600]">{tab === "login" ? "Log in" : "Sign up"}</h3>
           <button onClick={onClose} className="text-gray-700 hover:text-gray-900">✕</button>
         </div>
 
         <div className="mb-4 flex gap-2">
-          <button onClick={() => setTab("login")} className={`flex-1 rounded-md px-3 py-1 ${tab === "login" ? 'bg-[#006600] text-white' : 'border border-gray-200 text-gray-800 hover:bg-gray-50'}`}>Log in</button>
-          <button onClick={() => setTab("signup")} className={`flex-1 rounded-md px-3 py-1 ${tab === "signup" ? 'bg-[#006600] text-white' : 'border border-gray-200 text-gray-800 hover:bg-gray-50'}`}>Sign up</button>
+          <button onClick={() => setTab("login")} className="flex-1 rounded-md px-3 py-1" style={tab === 'login' ? { background: 'var(--nav-accent)', color: 'var(--nav-button-text)' } : { border: '1px solid var(--card-border)', color: 'var(--foreground)' }}>Log in</button>
+          <button onClick={() => setTab("signup")} className="flex-1 rounded-md px-3 py-1" style={tab === 'signup' ? { background: 'var(--nav-accent)', color: 'var(--nav-button-text)' } : { border: '1px solid var(--card-border)', color: 'var(--foreground)' }}>Sign up</button>
         </div>
 
         {message && <div className="mb-3 rounded bg-yellow-50 p-2 text-sm text-yellow-800">{message}</div>}
@@ -95,30 +95,30 @@ export default function AuthModal({ onClose, initial = "login" }: { onClose: () 
 
         {tab === "login" ? (
           <form onSubmit={handleLogin} className="space-y-3">
-            <label className="block text-sm font-medium text-gray-800">Email</label>
-            <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded border px-3 py-2 text-gray-900 placeholder-gray-400" />
-            <label className="block text-sm font-medium text-gray-800">Password</label>
-            <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded border px-3 py-2 text-gray-900 placeholder-gray-400" />
+            <label className="block text-sm font-medium" style={{ color: 'var(--foreground)' }}>Email</label>
+            <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
+            <label className="block text-sm font-medium" style={{ color: 'var(--foreground)' }}>Password</label>
+            <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
             <div className="flex items-center justify-between">
-              <button disabled={loading} type="submit" className="rounded bg-[#006600] px-4 py-2 text-white disabled:opacity-60">{loading ? '...' : 'Log in'}</button>
+              <button disabled={loading} type="submit" className="rounded px-4 py-2" style={{ background: 'var(--nav-accent)', color: 'var(--nav-button-text)' }}>{loading ? '...' : 'Log in'}</button>
             </div>
           </form>
         ) : (
           <form onSubmit={handleSignup} className="space-y-3">
-            <label className="block text-sm font-medium text-gray-800">Email</label>
-            <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded border px-3 py-2 text-gray-900 placeholder-gray-400" />
-            <label className="block text-sm font-medium text-gray-800">Password</label>
-            <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded border px-3 py-2 text-gray-900 placeholder-gray-400" />
-            <label className="block text-sm font-medium text-gray-800">Confirm password</label>
-            <input required type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full rounded border px-3 py-2 text-gray-900 placeholder-gray-400" />
+            <label className="block text-sm font-medium" style={{ color: 'var(--foreground)' }}>Email</label>
+            <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
+            <label className="block text-sm font-medium" style={{ color: 'var(--foreground)' }}>Password</label>
+            <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
+            <label className="block text-sm font-medium" style={{ color: 'var(--foreground)' }}>Confirm password</label>
+            <input required type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
             <div className="flex items-center justify-end">
-              <button disabled={loading} type="submit" className="rounded bg-[#006600] px-4 py-2 text-white disabled:opacity-60">{loading ? '...' : 'Create account'}</button>
+              <button disabled={loading} type="submit" className="rounded px-4 py-2" style={{ background: 'var(--nav-accent)', color: 'var(--nav-button-text)' }}>{loading ? '...' : 'Create account'}</button>
             </div>
           </form>
         )}
 
         <div className="mt-4 text-center text-sm text-gray-700">
-          By continuing you agree to the college's terms. This demo stores credentials with Supabase auth.
+          By continuing you agree to the college's terms.
         </div>
       </div>
     </div>

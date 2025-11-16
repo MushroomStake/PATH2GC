@@ -1,0 +1,63 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: var(--background);
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: 13px;
+}
+.icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+.label {
+  line-height: 1;
+}
+.pressed {
+  box-shadow: 0 0 0 2px rgba(0,128,0,0.08);
+}
+
+/* Tooltip */
+.tooltip {
+  position: absolute;
+  transform: translateY(-100%);
+  background: rgba(0,0,0,0.8);
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+  margin-bottom: 6px;
+  z-index: 40;
+}
+
+/* Parent wrapper must be positioned to show tooltip */
+.wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.wrapper:hover .tooltip,
+.wrapper:focus-within .tooltip {
+  opacity: 1;
+  transform: translateY(-110%);
+}
+
+/* Simple toggle icon animation */
+.anim .icon {
+  animation: theme-rotate 420ms ease;
+}
+
+@keyframes theme-rotate {
+  0% { transform: rotate(0deg) scale(1); }
+  40% { transform: rotate(20deg) scale(1.05); }
+  100% { transform: rotate(0deg) scale(1); }
+}

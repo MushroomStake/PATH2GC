@@ -27,7 +27,7 @@ export default function GetStartedButton() {
   }
 
   return (
-    <button onClick={openChat} className="inline-flex items-center gap-2 rounded-md bg-[#008000] px-5 py-3 text-sm font-medium text-white shadow hover:bg-[#006600]">
+    <button onClick={openChat} className="inline-flex items-center gap-2 rounded-md px-5 py-3 text-sm font-medium shadow hover:opacity-90" style={{ background: 'var(--nav-accent)', color: 'var(--nav-button-text)' }}>
       Get Started
     </button>
   );

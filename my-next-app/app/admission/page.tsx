@@ -22,14 +22,14 @@ export default async function AdmissionLanding() {
 
       <ol className="space-y-4">
         {steps.map((s) => (
-          <li key={s.id} className="rounded-md border p-4">
+          <li key={s.id} className="rounded-md p-4" style={{ border: '1px solid var(--card-border)' }}>
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold">{s.step_order}. {s.title}</h3>
                 <p className="text-sm text-gray-600">{s.description.slice(0, 200)}{s.description.length > 200 ? '...' : ''}</p>
               </div>
               <div>
-                <Link href={`/admission/${s.id}`} className="inline-flex items-center rounded-md border border-[#008000] px-3 py-2 text-sm font-medium text-[#008000]">View</Link>
+                <Link href={`/admission/${s.id}`} className="inline-flex items-center rounded-md px-3 py-2 text-sm font-medium" style={{ border: '1px solid var(--nav-accent)', color: 'var(--nav-accent)' }}>View</Link>
               </div>
             </div>
           </li>

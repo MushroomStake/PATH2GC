@@ -218,7 +218,7 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
   const content = (
     <div className="flex flex-col md:flex-row">
       {/* Desktop sidebar */}
-      <aside className="hidden md:block md:w-80 mr-6 bg-white text-gray-900 rounded p-4 h-[75vh] overflow-auto border border-gray-200">
+      <aside className="hidden md:block md:w-80 mr-6 rounded p-4 h-[75vh] overflow-auto assistant-sidebar" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--card-border)' }}>
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-semibold">Conversations</h4>
           <button onClick={startNewChat} className="text-xs bg-green-600 px-2 py-1 rounded">New</button>
@@ -243,7 +243,7 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
                 </button>
 
                 {openMenuFor === s.session_id ? (
-                  <div className="absolute right-0 mt-2 w-36 bg-white border rounded shadow z-20">
+                  <div className="absolute right-0 mt-2 w-36 rounded shadow z-20" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--card-border)' }}>
                     <button onClick={(e) => { e.stopPropagation(); handleRename(s.session_id); }} className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50">Rename</button>
                     <button onClick={(e) => { e.stopPropagation(); if (confirm('Delete conversation?')) handleDelete(s.session_id); }} className="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-50">Delete</button>
                   </div>
@@ -257,7 +257,7 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
       {/* Mobile slide-over sidebar */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 flex">
-          <div className="w-80 bg-white text-gray-900 rounded-r p-4 h-full overflow-auto border-r border-gray-200">
+          <div className="w-80 rounded-r p-4 h-full overflow-auto assistant-sidebar" style={{ background: 'var(--background)', color: 'var(--foreground)', borderRight: '1px solid var(--card-border)' }}>
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-semibold">Conversations</h4>
               <button onClick={() => setSidebarOpen(false)} className="text-xs bg-transparent px-2 py-1 rounded">Close</button>
@@ -282,7 +282,7 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
                     </button>
 
                     {openMenuFor === s.session_id ? (
-                      <div className="absolute right-0 mt-2 w-36 bg-white border rounded shadow z-20">
+                      <div className="absolute right-0 mt-2 w-36 rounded shadow z-20" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--card-border)' }}>
                         <button onClick={(e) => { e.stopPropagation(); handleRename(s.session_id); }} className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50">Rename</button>
                         <button onClick={(e) => { e.stopPropagation(); if (confirm('Delete conversation?')) { handleDelete(s.session_id); setSidebarOpen(false); } }} className="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-50">Delete</button>
                       </div>
@@ -297,18 +297,18 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
       )}
 
       <div className="flex-1">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded bg-[#006600] flex items-center justify-center text-white font-semibold">AI</div>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--card-border)' }}>
+            <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded" style={{ background: 'var(--nav-accent)', color: 'var(--nav-button-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>AI</div>
             <h3 className="text-sm font-semibold">AI Assistant</h3>
           </div>
           <div className="flex items-center gap-2">
             {/* Show conversations button on mobile */}
-            <button onClick={() => setSidebarOpen(true)} className="md:hidden inline-flex items-center rounded-md border border-gray-200 px-2 py-1 text-xs">Conversations</button>
+            <button onClick={() => setSidebarOpen(true)} className="md:hidden inline-flex items-center rounded-md px-2 py-1 text-xs" style={{ border: '1px solid var(--card-border)', color: 'var(--foreground)' }}>Conversations</button>
           </div>
         </div>
 
-  <div ref={containerRef} className="h-[60vh] md:h-[75vh] overflow-auto p-6 bg-white">
+  <div ref={containerRef} className="h-[60vh] md:h-[75vh] overflow-auto p-6" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
           {messages.length === 0 && <div className="text-sm text-gray-500">Ask questions about admissions, documents, deadlines, scholarships, or FAQs.</div>}
           <div className="flex flex-col gap-3">
             {messages.map((m, i) => (
@@ -322,7 +322,7 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
           </div>
         </div>
 
-        <div className="border-t px-4 py-3 bg-white">
+        <div className="px-4 py-3" style={{ borderTop: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }}>
           <div className="mb-2">
             {suggestions.length ? (
               <div className="flex flex-wrap gap-2">
@@ -330,7 +330,8 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
                   <button
                     key={idx}
                     onClick={() => { /* send the suggested text immediately */ sendMessage(s.text); }}
-                    className="text-xs px-3 py-1 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100"
+                    className="text-xs px-3 py-1 rounded-full bg-gray-50 hover:bg-gray-100"
+                    style={{ border: '1px solid var(--card-border)', background: 'transparent', color: 'var(--foreground)' }}
                   >
                     {s.text.length > 50 ? s.text.slice(0, 47) + '...' : s.text}
                   </button>
@@ -339,8 +340,8 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
             ) : null}
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
-            <input id="assistant-input" value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKey} placeholder="Ask about admissions..." className="flex-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400" />
-            <button onClick={() => sendMessage()} disabled={loading} className="rounded bg-[#006600] px-3 py-2 text-white disabled:opacity-60 w-full sm:w-auto">{loading ? '...' : 'Send'}</button>
+            <input id="assistant-input" value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKey} placeholder="Ask about admissions..." className="flex-1 rounded px-3 py-2" style={{ border: '1px solid var(--card-border)', background: 'var(--background)', color: 'var(--foreground)' }} />
+            <button onClick={() => sendMessage()} disabled={loading} className="rounded px-3 py-2 disabled:opacity-60 w-full sm:w-auto" style={{ background: 'var(--nav-accent)', color: 'var(--nav-button-text)' }}>{loading ? '...' : 'Send'}</button>
           </div>
         </div>
       </div>
@@ -349,8 +350,8 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
 
   // Always render inline (no modal/overlay)
   return (
-    <div className="mx-auto w-full max-w-6xl p-6 z-50">
-      <div className="rounded bg-white shadow-lg border border-gray-200 text-gray-900">{content}</div>
+      <div className="mx-auto w-full max-w-6xl p-6 z-50">
+      <div className="rounded shadow-lg" style={{ background: 'var(--background)', color: 'var(--foreground)', border: '1px solid var(--card-border)' }}>{content}</div>
     </div>
   );
 }

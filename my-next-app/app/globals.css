@@ -4,6 +4,13 @@
   --background: #ffffff;
   --foreground: #171717;
   --accent-green: #008000;
+  /* Navbar-specific variables (derive from global variables) */
+  --nav-bg: var(--background);
+  --nav-fg: var(--foreground);
+  --nav-accent: #006600;
+  --nav-accent-hover: #004d00;
+  --nav-button-text: #ffffff;
+  --card-border: rgba(0,0,0,0.08);
 }
 
 @theme inline {
@@ -20,6 +27,32 @@
   }
 }
 
+/* Explicit theme overrides using data-theme on the document element */
+html[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+html[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+/* Support Tailwind class-based dark mode: add class on <html> */
+html.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --nav-accent: #66cc66;
+  --nav-accent-hover: #449944;
+  --nav-button-text: #0a0a0a;
+  --card-border: rgba(255,255,255,0.14);
+}
+
+html.light {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -30,5 +63,68 @@ body {
 .btn-green {
   background-color: var(--accent-green);
   color: #fff;
+}
+
+/* Smooth theme change transitions: animate properties that reference CSS variables */
+*, *::before, *::after {
+  transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease, fill 220ms ease, stroke 220ms ease;
+}
+
+/* Slightly longer transition for large containers to feel smoother */
+header, main, footer, nav, .mx-auto {
+  transition-duration: 260ms;
+}
+
+/* Scrollbar styling to match theme (WebKit browsers) */
+/* Dark mode */
+html.dark *::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+html.dark *::-webkit-scrollbar-track {
+  background: var(--background);
+}
+html.dark *::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 999px;
+  border: 3px solid var(--background);
+}
+
+/* Light mode */
+html.light *::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+html.light *::-webkit-scrollbar-track {
+  background: var(--background);
+}
+html.light *::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.16);
+  border-radius: 999px;
+  border: 3px solid var(--background);
+}
+
+/* Firefox scrollbar color handling */
+html.dark, html.dark * {
+  scrollbar-color: rgba(255,255,255,0.12) var(--background);
+}
+html.light, html.light * {
+  scrollbar-color: rgba(0,0,0,0.16) var(--background);
+}
+
+/* Target assistant sidebar scrollbar specifically to avoid any default white gutter */
+.assistant-sidebar::-webkit-scrollbar {
+  width: 12px;
+}
+.assistant-sidebar::-webkit-scrollbar-track {
+  background: var(--background);
+}
+.assistant-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 999px;
+  border: 3px solid var(--background);
+}
+.assistant-sidebar {
+  scrollbar-color: rgba(255,255,255,0.12) var(--background);
 }
 
