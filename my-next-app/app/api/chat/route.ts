@@ -340,16 +340,16 @@ export async function POST(req: NextRequest) {
     // Try intent matching to see if we can reply deterministically from DB
     const sources: Array<{ type: 'step' | 'faq'; id: any; title: string }> = [];
       // Allow disabling deterministic/template responses via environment variable.
-      // When `DISABLE_DETERMINISTIC=true`, the route will skip deterministic
-      // rendering and always call the LLM provider path.
-      const DISABLE_DETERMINISTIC = process.env.DISABLE_DETERMINISTIC === 'true';
-      // Log the setting so runtime behavior can be verified in server logs.
-      try {
-        console.log('DISABLE_DETERMINISTIC=', DISABLE_DETERMINISTIC ? 'true' : 'false');
-      } catch (e) {
-        // ignore logging errors in restricted environments
-      }
+      // Accept several truthy values ('true','1','yes','on') and also support
+      // `NEXT_PUBLIC_DISABLE_DETERMINISTIC` if set for visibility in the build.
+      const rawDisable = (process.env.DISABLE_DETERMINISTIC || process.env.NEXT_PUBLIC_DISABLE_DETERMINISTIC || '').toString();
+      const DISABLE_DETERMINISTIC = ['1', 'true', 'yes', 'on'].includes(rawDisable.trim().toLowerCase());
+      // Log the raw and normalized values so runtime behavior can be verified in server logs.
+      try { console.log('DISABLE_DETERMINISTIC raw=', rawDisable, 'normalized=', DISABLE_DETERMINISTIC); } catch (e) {}
       const intent = matchIntent(trimmed);
+      if (intent && DISABLE_DETERMINISTIC) {
+        try { console.log('Intent matched but deterministic responses are disabled by env. Intent:', intent.id); } catch (e) {}
+      }
       if (!DISABLE_DETERMINISTIC && intent) {
       // If intent matched, render using the most relevant DB rows (prefer `topSteps`).
       // Passing `allSteps` here produced very long replies; prefer `topSteps` to keep
