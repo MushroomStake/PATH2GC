@@ -6,7 +6,7 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const clientSupabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-type Message = { who: 'user' | 'assistant'; text: string; sources?: any[] };
+type Message = { who: 'user' | 'assistant'; text: string; sources?: any[]; tldr?: string };
 
 // Render inline-only assistant. `onClose` kept optional for compatibility but unused.
 export default function AssistantPanel({ sessionId, inline = true }: { sessionId?: string | null; inline?: boolean }) {
@@ -20,6 +20,8 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
   const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
   const [titlesMap, setTitlesMap] = useState<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [analysis, setAnalysis] = useState<any | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const sessionIdRef = useRef<string | null>(sessionId || null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -194,11 +196,14 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
       }
 
   const sid = sessionIdRef.current || null;
-  const resp = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, message: text, userId }) });
+  // send recent message history to the server so it can use conversation context
+  const historyPayload = (messages || []).slice(-30).map(m => ({ who: m.who, text: m.text }));
+    const resp = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, message: text, userId, history: historyPayload }) });
       const json = await resp.json();
       const reply = json?.reply || (json?.error ? `Error: ${json.error}` : 'No reply');
       const sources = json?.sources || json?.source_meta || undefined;
-      setMessages(m => [...m, { who: 'assistant', text: reply, sources }]);
+      const tldr = json?.tldr || null;
+      setMessages(m => [...m, { who: 'assistant', text: reply, sources, tldr }]);
   // refresh the history list so the sidebar reflects recent activity
   if (userId) fetchHistory(userId);
     } catch (e: any) {
@@ -305,11 +310,30 @@ export default function AssistantPanel({ sessionId, inline = true }: { sessionId
           <div className="flex items-center gap-2">
             {/* Show conversations button on mobile */}
             <button onClick={() => setSidebarOpen(true)} className="md:hidden inline-flex items-center rounded-md px-2 py-1 text-xs" style={{ border: '1px solid var(--card-border)', color: 'var(--foreground)' }}>Conversations</button>
+            
           </div>
         </div>
 
   <div ref={containerRef} className="h-[60vh] md:h-[75vh] overflow-auto p-6" style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
           {messages.length === 0 && <div className="text-sm text-gray-500">Ask questions about admissions, documents, deadlines, scholarships, or FAQs.</div>}
+          {analysis ? (
+            <div className="mb-4 p-3 rounded border" style={{ border: '1px solid var(--card-border)', background: 'transparent' }}>
+              {analysis.error ? (
+                <div className="text-sm text-red-600">Analysis failed or returned no structured result.</div>
+              ) : (
+                <div>
+                  {analysis.summary ? <div className="text-sm font-medium mb-2">Summary: {analysis.summary}</div> : null}
+                  {analysis.clarifying_questions && analysis.clarifying_questions.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {analysis.clarifying_questions.map((q: string, idx: number) => (
+                        <button key={idx} onClick={() => sendMessage(q)} className="text-xs px-3 py-1 rounded-full bg-gray-50 hover:bg-gray-100" style={{ border: '1px solid var(--card-border)', background: 'transparent', color: 'var(--foreground)' }}>{q}</button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          ) : null}
           <div className="flex flex-col gap-3">
             {messages.map((m, i) => (
               <MessageBubble key={i} m={m} index={i} userAvatarUrl={userAvatarUrl} userIsAnonymous={userIsAnonymous} />
@@ -365,14 +389,31 @@ function MessageBubble({ m, index, userAvatarUrl, userIsAnonymous }: { m: Messag
 
   const isUser = m.who === 'user';
 
+  // Safely escape HTML and convert **bold** markers to <strong>
+  const escapeHtml = (s: string) =>
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+  const formatMessage = (text?: string) => {
+    if (!text) return '';
+    const escaped = escapeHtml(text);
+    // convert **bold** to <strong>
+    const withBold = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    return withBold;
+  };
+
+  const html = formatMessage(m.text as string);
+
   return (
     <div className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser ? (
         <img src={assistantIcon} alt="assistant" className="h-8 w-8 rounded-full object-cover" />
       ) : null}
 
-  <div className={`rounded p-3 ${isUser ? 'bg-green-50 self-end' : 'bg-gray-100 self-start'} max-w-full sm:max-w-[80%]`}>
-        <div className="text-sm whitespace-pre-line text-gray-900">{m.text}</div>
+      <div className={`rounded p-3 ${isUser ? 'bg-green-50 self-end' : 'bg-gray-100 self-start'} max-w-full sm:max-w-[80%]`}>
+        <div className="text-sm whitespace-pre-line text-gray-900" dangerouslySetInnerHTML={{ __html: html }} />
 
         {m.sources?.length ? (
           <div className="mt-2 text-xs text-gray-500">

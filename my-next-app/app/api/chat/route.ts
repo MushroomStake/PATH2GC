@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import fs from 'fs/promises';
+import path from 'path';
 import { matchIntent, renderIntentResponse } from '../../../src/lib/intents';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -142,6 +144,33 @@ function extractTextFromProviderResponse(json: any): string {
   }
 }
 
+// If a separate TL;DR string is provided, remove the same leading text
+// from the main reply to avoid duplication (e.g., both `tldr` and `reply`
+// containing the same one-line summary). Comparison is case-insensitive
+// and tolerant to trailing punctuation/newline differences.
+function stripTldrFromReply(reply: string, tldr?: string) {
+  if (!reply || !tldr) return reply;
+  try {
+    const normalize = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/[\r\n]/g, ' ').trim();
+    const nTldr = normalize(tldr).replace(/[\.\!\?]+$/,'');
+    const nReply = normalize(reply);
+    if (!nTldr) return reply;
+    // If reply starts with the tldr (or the tldr plus a trailing punctuation), remove that portion.
+    const rx = new RegExp('^' + nTldr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\.!?]?(\s|$)', 'i');
+    if (rx.test(nReply)) {
+      // Remove only the first occurrence from the original reply (preserve original formatting after)
+      // Build a variant of the tldr to remove from the original reply text
+      const origTldr = reply.split(/\n/)[0];
+      const escaped = origTldr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const origRx = new RegExp('^' + escaped + '[\\.!?]?(\s|\n)?', 'i');
+      return reply.replace(origRx, '').trim();
+    }
+    return reply;
+  } catch (e) {
+    return reply;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
   const xff = req.headers.get('x-forwarded-for');
@@ -159,7 +188,7 @@ export async function POST(req: NextRequest) {
       console.error('Failed to parse request body as JSON', parseErr);
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-  const { sessionId, message, userId } = body;
+    const { sessionId, message, userId, history, simplify } = body;
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'Invalid message' }, { status: 400 });
     }
@@ -181,6 +210,7 @@ export async function POST(req: NextRequest) {
   // keep top matches available after fetch so we can return deterministic answers for common intents
   let topSteps: any[] = [];
   let topFaqs: any[] = [];
+  let allSteps: any[] = [];
   if (supabase) {
       try {
         // helper: simple tokenizer and relevance scoring by token overlap (fast, no external APIs)
@@ -199,6 +229,7 @@ export async function POST(req: NextRequest) {
         const faqsRes = await supabase.from('faqs').select('id,question,answer');
 
         const steps = (!stepsRes.error && stepsRes.data) ? (stepsRes.data as any[]) : [];
+        allSteps = steps;
         const faqs = (!faqsRes.error && faqsRes.data) ? (faqsRes.data as any[]) : [];
 
         // Score and pick top N relevant items
@@ -237,15 +268,166 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // contextString will be built after optionally prepending recent client history
+
+    // If the client provided recent conversation history, build a short summary
+    // and include a compact transcript. Place the summary first so the LLM sees
+    // recent context before the database context (helps follow-ups like "what's next").
+    let recentSummary = '';
+    if (Array.isArray(history) && history.length) {
+      try {
+        const maxTurns = 6; // keep the transcript short
+        const recent = history.slice(-maxTurns);
+        const histLines = recent.map((h: any) => (h.who === 'user' ? `User: ${String(h.text)}` : `Assistant: ${String(h.text)}`));
+        // find last user and assistant messages for a one-line summary
+        let lastUser = '';
+        let lastAssistant = '';
+        for (let i = recent.length - 1; i >= 0; i--) {
+          const r = recent[i];
+          if (!lastUser && r.who === 'user' && r.text) lastUser = String(r.text);
+          if (!lastAssistant && r.who === 'assistant' && r.text) lastAssistant = String(r.text);
+          if (lastUser && lastAssistant) break;
+        }
+        if (lastUser || lastAssistant) {
+          recentSummary = `${lastUser ? `User asked: "${lastUser}".` : ''} ${lastAssistant ? `Assistant replied: "${lastAssistant}".` : ''}`.trim();
+        }
+        // include short transcript as a context piece (after the summary we add below)
+        contextPieces.unshift(`Recent conversation:\n${histLines.join('\n')}`);
+      } catch (e) {
+        // ignore malformed history
+      }
+    }
+
     const contextString = contextPieces.join('\n\n').slice(0, 4000); // truncate to avoid huge prompts
+
+    // Infer completed steps from recent history (if available)
+    function inferCompletedStepsFromHistory(hist: any[] = []) {
+      const nums = new Set<number>();
+      try {
+        for (const h of hist || []) {
+          if (!h || !h.text || String(h.who).toLowerCase() !== 'user') continue;
+          const txt = String(h.text).toLowerCase();
+          // direct matches: "step 3"
+          for (const m of txt.matchAll(/step\s+(\d+)/ig)) {
+            const n = Number(m[1]); if (!Number.isNaN(n)) nums.add(n);
+          }
+          // ranges/lists: "steps 1 and 2" or "steps 1,2"
+          const seq = txt.match(/steps?\s+([0-9,\sand]+)/i);
+          if (seq && seq[1]) {
+            for (const d of String(seq[1]).match(/\d+/g) || []) nums.add(Number(d));
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      return Array.from(nums.values()).sort((a,b) => a-b);
+    }
+
+    const completedSteps = inferCompletedStepsFromHistory(history);
+
+    // Helper: detect short closing/ack messages where suggesting "next steps" is undesired
+    const isClosingMessage = (txt: string) => {
+      if (!txt) return false;
+      const t = txt.trim().toLowerCase();
+      // common closers / acknowledgements
+      const closers = ['thanks', 'thank you', 'thx', "that's all", 'we\'re done', 'we are done', 'done', 'ok', 'okay', 'got it', 'no, thanks', 'no thanks', 'stop', 'proceed'];
+      if (closers.includes(t)) return true;
+      // short polite replies
+      if (t.length <= 6 && /^(ok|okay|ty|nm|k)$/.test(t)) return true;
+      return false;
+    };
 
     // Try intent matching to see if we can reply deterministically from DB
     const sources: Array<{ type: 'step' | 'faq'; id: any; title: string }> = [];
-    const intent = matchIntent(trimmed);
-    if (intent) {
-      // If intent matched, and we have DB rows (topSteps/topFaqs), render template
-      const rendered = renderIntentResponse(intent.id, topSteps, topFaqs);
+      // Allow disabling deterministic/template responses via environment variable.
+      // When `DISABLE_DETERMINISTIC=true`, the route will skip deterministic
+      // rendering and always call the LLM provider path.
+      const DISABLE_DETERMINISTIC = process.env.DISABLE_DETERMINISTIC === 'true';
+      // Log the setting so runtime behavior can be verified in server logs.
+      try {
+        console.log('DISABLE_DETERMINISTIC=', DISABLE_DETERMINISTIC ? 'true' : 'false');
+      } catch (e) {
+        // ignore logging errors in restricted environments
+      }
+      const intent = matchIntent(trimmed);
+      if (!DISABLE_DETERMINISTIC && intent) {
+      // If intent matched, render using the most relevant DB rows (prefer `topSteps`).
+      // Passing `allSteps` here produced very long replies; prefer `topSteps` to keep
+      // deterministic replies concise and relevant. Fallback to `allSteps` only if
+      // `topSteps` is empty.
+      const rendered = renderIntentResponse(intent.id, (topSteps && topSteps.length) ? topSteps : allSteps, topFaqs, completedSteps);
       if (rendered && rendered.reply) {
+        // Sanitize deterministic reply: remove leading TL;DR paragraph and inline 'Source:' lines
+        const sanitizeText = (txt: string) => {
+          if (!txt) return txt;
+          try {
+            // Split into paragraphs, but instead of removing a TL;DR paragraph,
+            // strip only the leading "TL;DR" label and keep the content that follows.
+            const parts = txt.split(/\n\n+/);
+            if (parts.length) {
+              parts[0] = parts[0].replace(/^\s*(tl\s*[:;]?dr|tldr)\b[:\-]?\s*/i, '');
+            }
+            let cleaned = parts.join('\n\n');
+            // remove any inline occurrences like '(Source: ...)' or 'Source: ...'
+            cleaned = cleaned.replace(/\(?\s*source(s)?\s*[:\-]?\s*[^)\n]+\)?/ig, '');
+            // remove any lines that start with 'Source:' as a safety
+            cleaned = cleaned.split('\n').filter(l => !/^\s*source(s)?\s*[:\-]/i.test(l)).join('\n');
+            // remove empty parentheses and tidy whitespace
+            cleaned = cleaned.replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ');
+            // collapse multiple blank lines
+            cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+            return cleaned;
+          } catch (e) {
+            return txt;
+          }
+        };
+        const originalRenderedReply = rendered.reply;
+        const cleanedRenderedReply = sanitizeText(originalRenderedReply);
+        // If sanitization removed everything (empty string), fall back to the original reply
+        if (!cleanedRenderedReply || !cleanedRenderedReply.trim()) {
+          console.warn('Sanitization removed entire deterministic reply; returning original reply to avoid empty response.');
+          rendered.reply = originalRenderedReply;
+        } else {
+          rendered.reply = cleanedRenderedReply;
+          // If the user's message appears to be a closing/ack, remove suggested next steps
+          try {
+            if (isClosingMessage(trimmed)) {
+              // remove a 'Next step' or 'Suggested next steps' section and everything after it
+              rendered.reply = rendered.reply.replace(/\n\n?(Suggested next steps:|Next step[s]?:)[\s\S]*$/i, '').trim();
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+        // Deduplicate sources by type+id to avoid repeated source entries in metadata
+        try {
+          if (Array.isArray(rendered.sources)) {
+            const seenSrc = new Set<string>();
+            const uniqSources: typeof rendered.sources = [];
+            for (const s of rendered.sources) {
+              const key = `${s.type}::${String(s.id)}`;
+              if (!seenSrc.has(key)) {
+                seenSrc.add(key);
+                uniqSources.push(s);
+              }
+            }
+            rendered.sources = uniqSources;
+          }
+        } catch (e) {
+          // ignore dedupe errors
+        }
+
+        // Avoid duplicating TL;DR text: if `rendered.tldr` is present and the
+        // main `rendered.reply` repeats that one-line TL;DR at the top, strip
+        // the leading duplicate so the UI can show the TL;DR separately.
+        try {
+          if (rendered.tldr) {
+            rendered.reply = stripTldrFromReply(rendered.reply || '', rendered.tldr);
+          }
+        } catch (e) {
+          // ignore
+        }
+
         // log with path info
         if (supabase) {
           try {
@@ -254,13 +436,18 @@ export async function POST(req: NextRequest) {
             console.error('Supabase insert failed', e);
           }
         }
-        return NextResponse.json({ reply: rendered.reply, sources: rendered.sources, path: 'deterministic' });
+        return NextResponse.json({ reply: rendered.reply, tldr: rendered.tldr || null, sources: rendered.sources, path: 'deterministic', nextStep: rendered.nextStep || null });
       }
     }
 
-  const systemPrompt = `You are an admissions assistant for this college. ONLY answer questions strictly related to the college, its admissions process, application requirements, deadlines, fees, scholarships, interviews, program information, campus procedures, and Frequently Asked Questions (FAQs). Use the provided database context when available and avoid inventing details.
+  // Build system prompt and include a short Recent Conversation summary first (if available),
+  // then include the database context so the LLM remains grounded.
+  const recentPrefix = recentSummary ? `\n\nRecent Conversation Summary:\n${recentSummary}` : '';
+  // Plain-language instruction to make replies easier to understand by default
+  const plainInstruction = 'Use clear, simple language. Write short sentences, avoid jargon, and define any acronyms. Start replies with a one-line TL;DR when appropriate.';
+  const systemPrompt = `${plainInstruction}\n\nYou are an admissions assistant for this college. ONLY answer questions strictly related to the college, its admissions process, application requirements, deadlines, fees, scholarships, interviews, program information, campus procedures, and Frequently Asked Questions (FAQs). Use the provided Recent Conversation Summary and database context when available and avoid inventing details.
 
-If a user's question is outside admissions/school scope, respond briefly with: "I can only answer questions about this college's admissions and FAQs. For other topics, please contact the admissions office." Do not provide unrelated advice or general information outside the school's admissions and FAQ content. When you use content from the database, cite the source items used (e.g., "Source: Admission Step 2 - Application Documents"). Keep answers concise and include suggested next steps. If a question requests forms or file downloads, point the user to the Admissions page.${contextString ? '\n\nContext from the college database:\n' + contextString : ''}`;
+If a user's question is outside admissions/school scope, respond briefly with: "I can only answer questions about this college's admissions and FAQs. For other topics, please contact the admissions office." Do not provide unrelated advice or general information outside the school's admissions and FAQ content. When you use content from the database, cite the source items used (e.g., "Source: Admission Step 2 - Application Documents"). Keep answers concise and include suggested next steps. If a question requests forms or file downloads, point the user to the Admissions page.${recentPrefix}${contextString ? '\n\nContext from the college database:\n' + contextString : ''}`;
 
     let assistantText = '';
 
@@ -284,7 +471,9 @@ If a user's question is outside admissions/school scope, respond briefly with: "
       const provider = await detectProvider();
       let requestUrl = CEREBRAS_API_URL;
       const headers: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' };
-      let bodyObj: any = { prompt: trimmed, context: systemPrompt, temperature: 0.2, max_tokens: 1024 };
+      const preferredTemp = simplify ? 0.0 : 0.2;
+      const simplifyHint = simplify ? '\n\nPlease phrase answers in short, plain sentences and short bullet lists. Give a one-line TL;DR at the top.' : '';
+      let bodyObj: any = { prompt: trimmed, context: systemPrompt + (simplify ? simplifyHint : ''), temperature: preferredTemp, max_tokens: 1024 };
 
       if (provider) {
         requestUrl = provider.url;
@@ -296,35 +485,35 @@ If a user's question is outside admissions/school scope, respond briefly with: "
         // Ensure the system prompt is included for chat-style providers by inserting it as a system message
         switch (provider.payloadStyle) {
           case 'prompt':
-            bodyObj = { prompt: trimmed, context: systemPrompt, temperature: 0.2, max_tokens: 1024 };
+            bodyObj = { prompt: trimmed, context: systemPrompt + (simplify ? simplifyHint : ''), temperature: preferredTemp, max_tokens: 1024 };
             break;
           case 'chat':
             // Chat-style providers expect a messages array with a system message first
             bodyObj = {
               model: CEREBRAS_MODEL,
               messages: [
-                { role: 'system', content: systemPrompt },
+                { role: 'system', content: systemPrompt + (simplify ? simplifyHint : '') },
                 { role: 'user', content: trimmed }
               ],
               stream: false,
-              temperature: 0.2,
+              temperature: preferredTemp,
               max_tokens: 1024
             };
             break;
           case 'input':
             // Some providers support an input + context field
-            bodyObj = { input: trimmed, context: systemPrompt };
+            bodyObj = { input: trimmed, context: systemPrompt + (simplify ? simplifyHint : '') };
             break;
           case 'messages':
             // Include system message for generic messages-style providers
-            bodyObj = { messages: [ { role: 'system', content: systemPrompt }, { role: 'user', content: trimmed } ] };
+            bodyObj = { messages: [ { role: 'system', content: systemPrompt + (simplify ? simplifyHint : '') }, { role: 'user', content: trimmed } ] };
             break;
           case 'openai':
             // For OpenAI-like completions, prepend the system prompt to the prompt body
-            bodyObj = { model: 'gpt-large', prompt: systemPrompt + '\n\nUser: ' + trimmed, max_tokens: 1024, temperature: 0.2 };
+            bodyObj = { model: 'gpt-large', prompt: systemPrompt + (simplify ? simplifyHint : '') + '\n\nUser: ' + trimmed, max_tokens: 1024, temperature: preferredTemp };
             break;
           default:
-            bodyObj = { prompt: trimmed, context: systemPrompt };
+            bodyObj = { prompt: trimmed, context: systemPrompt + (simplify ? simplifyHint : '') };
         }
       } else {
         // Default: use Authorization Bearer and prompt-style payload
@@ -370,6 +559,17 @@ If a user's question is outside admissions/school scope, respond briefly with: "
     // Normalize sources and path for non-deterministic replies (LLM / mock / canned)
     const responsePath = USE_MOCK_LLM ? 'mock' : (CEREBRAS_API_KEY ? 'llm' : 'canned');
 
+    // Build a short TL;DR for non-deterministic replies (from LLM/mock)
+    const computeTldr = (txt: string) => {
+      if (!txt) return '';
+      const firstLine = txt.split('\n').find(Boolean) || '';
+      const match = firstLine.match(/(.+?[\.\!\?])(\s|$)/);
+      if (match && match[1]) return match[1].trim().slice(0, 200);
+      return firstLine.trim().slice(0, 200) || txt.trim().slice(0, 200);
+    };
+
+    const nonDeterministicTldr = computeTldr(assistantText);
+
     // If we didn't already populate sources (used by deterministic responses), build them from fetched DB rows
     try {
       if (sources.length === 0 && (topSteps.length || topFaqs.length)) {
@@ -384,16 +584,138 @@ If a user's question is outside admissions/school scope, respond briefly with: "
       console.error('Failed to build sources array', e);
     }
 
+    // Server-side post-processing: if the client requested simplification and
+    // the LLM reply appears complex, call the provider again to simplify the reply.
+    const isComplex = (txt: string) => {
+      if (!txt) return false;
+      try {
+        // Heuristic: average words per sentence > 18 OR total words > 180
+        const sentences = txt.split(/[\.\!\?]+/).map(s => s.trim()).filter(Boolean);
+        const words = txt.split(/\s+/).filter(Boolean);
+        const avgWords = sentences.length ? (words.length / sentences.length) : words.length;
+        return avgWords > 18 || words.length > 180;
+      } catch (e) {
+        return false;
+      }
+    };
+
+    let finalAssistantText = assistantText;
+    let finalTldr = nonDeterministicTldr;
+
+    if (simplify && finalAssistantText && isComplex(finalAssistantText) && CEREBRAS_API_KEY) {
+      try {
+        const simplifierPrompt = `Rewrite the following assistant reply into clear, simple language suitable for a general audience. Use short sentences, avoid jargon, define acronyms, and include a one-line TL;DR at the top. Keep lists short and use plain words.\n\nOriginal reply:\n${finalAssistantText}`;
+        const simplifierProvider = await detectProvider();
+        let simplifierUrl = CEREBRAS_API_URL;
+        const simplifierHeaders: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' };
+        if (simplifierProvider) {
+          simplifierUrl = simplifierProvider.url;
+          if (simplifierProvider.authHeader === 'x-api-key') simplifierHeaders['x-api-key'] = CEREBRAS_API_KEY || '';
+          else simplifierHeaders['Authorization'] = `Bearer ${CEREBRAS_API_KEY}`;
+        } else {
+          simplifierHeaders['Authorization'] = `Bearer ${CEREBRAS_API_KEY}`;
+        }
+
+        let simplifyBody: any = { prompt: simplifierPrompt, max_tokens: 800, temperature: 0.0 };
+        if (simplifierProvider) {
+          switch (simplifierProvider.payloadStyle) {
+            case 'chat':
+              simplifyBody = { model: CEREBRAS_MODEL, messages: [{ role: 'system', content: 'You rewrite text into simple plain language.' }, { role: 'user', content: simplifierPrompt }], stream: false, temperature: 0.0, max_tokens: 800 };
+              break;
+            case 'prompt':
+            default:
+              simplifyBody = { prompt: simplifierPrompt, max_tokens: 800, temperature: 0.0 };
+              break;
+          }
+        }
+
+        const simplResp = await tryFetchWithTimeout(simplifierUrl, { method: 'POST', headers: simplifierHeaders, body: JSON.stringify(simplifyBody) }, 8000);
+        if (simplResp && simplResp.ok) {
+          const txt = await simplResp.text();
+          let parsed: any = undefined;
+          try { parsed = JSON.parse(txt || '{}'); } catch (e) { parsed = txt; }
+          const simplified = extractTextFromProviderResponse(parsed) || '';
+          if (simplified) {
+            finalAssistantText = simplified;
+            finalTldr = computeTldr(finalAssistantText);
+          }
+        }
+      } catch (e) {
+        console.error('Simplification attempt failed', e);
+      }
+    }
+
+    // Sanitize finalAssistantText: remove any leading "TL;DR" label but keep the content,
+    // and remove inline 'Source:' lines. If sanitization removes everything, fall back.
+    const sanitizeText = (txt: string) => {
+      if (!txt) return txt;
+      try {
+        const parts = txt.split(/\n\n+/);
+        if (parts.length) {
+          // Remove only the literal TL;DR label at the start of the first paragraph
+          parts[0] = parts[0].replace(/^\s*(tl\s*[:;]?dr|tldr)\b[:\-]?\s*/i, '');
+        }
+        let cleaned = parts.join('\n\n');
+        // remove any inline occurrences like '(Source: ...)' or 'Source: ...'
+        cleaned = cleaned.replace(/\(?\s*source(s)?\s*[:\-]?\s*[^)\n]+\)?/ig, '');
+        // remove any lines starting with 'Source:' as a safety
+        cleaned = cleaned.split('\n').filter(l => !/^\s*source(s)?\s*[:\-]/i.test(l)).join('\n');
+        // tidy whitespace and remove empty parentheses
+        cleaned = cleaned.replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ');
+        cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+        return cleaned;
+      } catch (e) {
+        return txt;
+      }
+    };
+
+    const originalAssistantText = finalAssistantText;
+    finalAssistantText = sanitizeText(finalAssistantText);
+    if (!finalAssistantText || !finalAssistantText.trim()) {
+      console.warn('Sanitization removed entire LLM reply; falling back to original assistant text to avoid empty response.');
+      finalAssistantText = originalAssistantText || '';
+    }
+    // If the user just closed the conversation, remove any "Next step" suggestions
+    try {
+      if (isClosingMessage(trimmed) && finalAssistantText) {
+        finalAssistantText = finalAssistantText.replace(/\n\n?(Suggested next steps:|Next step[s]?:)[\s\S]*$/i, '').trim();
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // If the simplifier / LLM also returned a separate TL;DR, remove duplicated
+    // leading TL;DR text from the body so the UI can display the tl;dr field only.
+    try {
+      if (finalTldr) {
+        finalAssistantText = stripTldrFromReply(finalAssistantText || '', finalTldr);
+      }
+    } catch (e) {
+      // ignore
+    }
+
     // Log chat to Supabase if available (include source metadata and path)
     if (supabase) {
       try {
-        await supabase.from('chat_logs').insert({ session_id: sessionId || null, user_id: userId || null, user_message: trimmed, assistant_response: assistantText, source_meta: sources, path: responsePath });
+        await supabase.from('chat_logs').insert({ session_id: sessionId || null, user_id: userId || null, user_message: trimmed, assistant_response: finalAssistantText, source_meta: sources, path: responsePath });
       } catch (e) {
         console.error('Supabase insert failed', e);
       }
     }
 
-    return NextResponse.json({ reply: assistantText, sources, path: responsePath });
+    // Also include local About page content (if present) so the assistant can cite it.
+    try {
+      const aboutFile = path.join(process.cwd(), 'src', 'data', 'about-content.json');
+      const aboutRaw = await fs.readFile(aboutFile, 'utf8');
+      const aboutJson = JSON.parse(aboutRaw);
+      if (aboutJson && aboutJson.text) {
+        contextPieces.push(`About page content:\n${aboutJson.text}`);
+      }
+    } catch (e) {
+      // ignore if file not present or parse failed
+    }
+
+    return NextResponse.json({ reply: finalAssistantText, tldr: finalTldr || null, sources, path: responsePath });
   } catch (error) {
     console.error('Chat route error', error);
     const isProd = process.env.NODE_ENV === 'production';
