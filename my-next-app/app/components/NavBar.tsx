@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import AuthModal from "./AuthModal";
 import ThemeToggle from "./ThemeToggle";
+import { useToast } from "./ToastProvider";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -63,6 +64,8 @@ export default function NavBar() {
     };
   }, []);
 
+  const { showToast } = useToast();
+
   const openAuth = (tab: "login" | "signup") => {
     setAuthTab(tab);
     setShowAuth(true);
@@ -104,7 +107,7 @@ export default function NavBar() {
                       <Link href="/profile" className="text-xs hover:underline" style={{ color: 'var(--foreground)', opacity: 0.8 }}>Edit profile</Link>
                     </div>
                   </div>
-                  <button onClick={async () => { if (!supabase) return; await supabase.auth.signOut(); setUser(null); }} className="inline-flex items-center rounded-md px-3 py-1 text-sm font-medium" style={{ color: 'var(--nav-accent)', borderColor: 'var(--nav-accent)', borderStyle: 'solid' }}>Sign out</button>
+                  <button onClick={async () => { if (!supabase) return; const { error } = await supabase.auth.signOut(); if (!error) { showToast('Signed out successfully','success'); } else { showToast('Sign out failed','error'); } setUser(null); }} className="inline-flex items-center rounded-md px-3 py-1 text-sm font-medium" style={{ color: 'var(--nav-accent)', borderColor: 'var(--nav-accent)', borderStyle: 'solid' }}>Sign out</button>
                 </>
               )}
             </div>
@@ -120,7 +123,7 @@ export default function NavBar() {
             ) : (
               <>
                 <Avatar src={user.profile?.signed_avatar_url || user.profile?.avatar_url} alt={(user.profile?.name || user.email) as string} />
-                <button onClick={async () => { if (!supabase) return; await supabase.auth.signOut(); setUser(null); }} className="inline-flex items-center rounded-md px-3 py-1 text-sm font-medium" style={{ color: 'var(--nav-accent)', borderColor: 'var(--nav-accent)', borderStyle: 'solid' }}>Sign out</button>
+                <button onClick={async () => { if (!supabase) return; const { error } = await supabase.auth.signOut(); if (!error) { showToast('Signed out successfully','success'); } else { showToast('Sign out failed','error'); } setUser(null); }} className="inline-flex items-center rounded-md px-3 py-1 text-sm font-medium" style={{ color: 'var(--nav-accent)', borderColor: 'var(--nav-accent)', borderStyle: 'solid' }}>Sign out</button>
               </>
             )}
             <ThemeToggle />
@@ -156,7 +159,7 @@ export default function NavBar() {
                       <Link href="/profile" className="text-xs hover:underline" style={{ color: 'var(--foreground)', opacity: 0.85 }}>Edit profile</Link>
                     </div>
                   </div>
-                  <button onClick={async () => { if (!supabase) return; await supabase.auth.signOut(); setUser(null); setMenuOpen(false); }} className="inline-flex w-full items-center justify-center rounded-md px-3 py-2 text-sm font-medium" style={{ color: 'var(--nav-accent)', borderColor: 'var(--nav-accent)', borderStyle: 'solid' }}>Sign out</button>
+                  <button onClick={async () => { if (!supabase) return; const { error } = await supabase.auth.signOut(); if (!error) { showToast('Signed out successfully','success'); } else { showToast('Sign out failed','error'); } setUser(null); setMenuOpen(false); }} className="inline-flex w-full items-center justify-center rounded-md px-3 py-2 text-sm font-medium" style={{ color: 'var(--nav-accent)', borderColor: 'var(--nav-accent)', borderStyle: 'solid' }}>Sign out</button>
                 </>
               )}
             </div>

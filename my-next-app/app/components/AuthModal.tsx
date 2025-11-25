@@ -1,12 +1,14 @@
 "use client";
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { useToast } from "./ToastProvider";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 export default function AuthModal({ onClose, initial = "login" }: { onClose: () => void; initial?: "login" | "signup" }) {
+  const { showToast } = useToast();
   const [tab, setTab] = useState<"login" | "signup">(initial);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,15 +32,25 @@ export default function AuthModal({ onClose, initial = "login" }: { onClose: () 
           setMessage(msg);
         }
       } else {
-        const user: any = (res as any).data?.user || (res as any).user || null;
-        const confirmed = user?.confirmed_at || user?.email_confirmed_at || null;
-        if (!confirmed) {
-          // If Supabase allowed sign-in but email not confirmed, sign out and instruct the user.
+        // Explicitly fetch the current user to get authoritative confirmation fields
+        try {
+          const getRes = await supabase.auth.getUser();
+          const user: any = getRes?.data?.user ?? (res as any).data?.user ?? (res as any).user ?? null;
+          const confirmed = user?.confirmed_at || user?.email_confirmed_at || null;
+          if (!confirmed) {
+            // Prevent access for unverified emails: sign out and notify user
+            try { await supabase.auth.signOut(); } catch (e) {}
+            setMessage('Your email address has not been confirmed. Please check your inbox for the confirmation link before logging in.');
+            showToast('Please confirm your email before signing in', 'error');
+          } else {
+            setMessage("Logged in — you are now signed in.");
+            showToast('Signed in successfully', 'success');
+            setTimeout(() => onClose(), 900);
+          }
+        } catch (e) {
+          // If fetching the user fails, be conservative and sign out
           try { await supabase.auth.signOut(); } catch (e) {}
-          setMessage('Your email address has not been confirmed. Please check your inbox for the confirmation link before logging in.');
-        } else {
-          setMessage("Logged in — you are now signed in.");
-          setTimeout(() => onClose(), 900);
+          setMessage('Unable to verify account status. Please try again or contact support.');
         }
       }
     } catch (e: any) {
